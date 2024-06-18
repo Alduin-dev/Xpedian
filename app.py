@@ -233,7 +233,7 @@ def on_right_click(event, download_manager):
 def main():
     global listbox
     root = tk.Tk()
-    root.title("XpedianMp3")
+    root.title("Xpedian")
 
     window_width = 800
     window_height = 400
