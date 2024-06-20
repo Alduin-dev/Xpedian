@@ -1,5 +1,5 @@
 import tkinter as tk
-from tkinter import Button, ttk, filedialog, messagebox, simpledialog, Menu
+from tkinter import Button, ttk, filedialog, messagebox, Menu, Scrollbar, Label, Radiobutton, simpledialog
 import threading
 import re
 import os
@@ -9,21 +9,25 @@ from PIL import Image, ImageTk
 from pytube import YouTube, Playlist
 from concurrent.futures import ThreadPoolExecutor
 from pydub import AudioSegment
+from plyer import notification
 
-# Definición de colores y tema
 PRIMARY_COLOR = "#007aff"
 SECONDARY_COLOR = "#34c759"
 BACKGROUND_COLOR = "#f5f5f5"
 TEXT_COLOR = "#1c1c1e"
 
 class DownloadManager:
-    def __init__(self, root):
+    def __init__(self, root, file_extension):
         self.root = root
+        self.file_extension = file_extension
         self.downloads = []
         self.completed_count = 0
         self.executor = ThreadPoolExecutor(max_workers=5)
+        self.listbox = None
+    def set_listbox(self, listbox):
+        self.listbox = listbox
 
-    def add_download(self, url, output_folder, file_extension='mp3'):
+    def add_download(self, url, output_folder):
         download = {
             "url": url,
             "progress": 0,
@@ -32,7 +36,7 @@ class DownloadManager:
             "filename": None,
             "title": None,
             "thumbnail": None,
-            "file_extension": file_extension
+            "file_extension": self.file_extension
         }
         self.downloads.append(download)
         return download
@@ -48,12 +52,13 @@ class DownloadManager:
             self.root.after(0, lambda: messagebox.showerror("Error", f"Error al calcular el progreso: {e}"))
 
     def update_list(self):
-        listbox.delete(0, tk.END)
+        self.listbox.delete(0, tk.END)
         for download in self.downloads:
-            listbox.insert(
-                tk.END, f"{download['title']} - {download['url']} - {download['progress']:.2f}% - {download['status']}"
-            )
-
+            item_text = f"{download['title']} - {download['url']} - {download['progress']:.2f}% - {download['status']}"
+            self.listbox.insert(tk.END, item_text)
+            if download['thumbnail']:
+                self.listbox.itemconfig(tk.END, {'bg': 'lightgrey'})
+                
     def clear_completed_downloads(self):
         self.downloads = [d for d in self.downloads if d["status"] != "Completado"]
         self.update_list()
@@ -66,23 +71,31 @@ class DownloadManager:
 
         if self.completed_count == len(self.downloads):
             self.root.after(0, lambda: messagebox.showinfo("Éxito", "Todas las descargas se han completado."))
+            self.show_notification("Descargas Completadas", "Todas las descargas se han completado con éxito.")
 
-        # Limpiar la lista después de 10 segundos
         self.root.after(10000, self.clear_completed_downloads)
 
-    def download_from_url(self, url, output_folder, file_extension='mp3'):
+    def show_notification(self, title, message):
+        notification.notify(
+            title=title,
+            message=message,
+            app_name="Xpedian Downloader",
+            timeout=10
+        )
+
+    def download_from_url(self, url, output_folder):
         if 'playlist' in url.lower():
             try:
                 playlist = Playlist(url)
                 for video_url in playlist.video_urls:
-                    self.executor.submit(self.download_file, video_url, output_folder, file_extension)
+                    self.executor.submit(self.download_file, video_url, output_folder)
             except Exception as e:
                 messagebox.showerror("Error", f"Error al descargar la lista de reproducción: {e}")
         else:
-            self.executor.submit(self.download_file, url, output_folder, file_extension)
+            self.executor.submit(self.download_file, url, output_folder)
 
-    def download_file(self, url, output_folder, file_extension='mp3'):
-        if file_extension == 'mp4':
+    def download_file(self, url, output_folder):
+        if self.file_extension == 'mp4':
             self.download_video_mp4_single(url, output_folder)
         else:
             self.download_mp3_single(url, output_folder)
@@ -106,10 +119,9 @@ class DownloadManager:
             temp_filename = filename.replace(".mp3", "_temp.mp4")
             stream.download(output_path=output_folder, filename=temp_filename)
 
-            # Convertir a mp3 con 128kbps usando pydub
             audio = AudioSegment.from_file(temp_filename)
             audio.export(filename, format="mp3", bitrate="128k")
-            os.remove(temp_filename)  # Eliminar el archivo temporal
+            os.remove(temp_filename)
 
             thumbnail_url = yt.thumbnail_url
             self.download_thumbnail(thumbnail_url, download)
@@ -168,24 +180,13 @@ def is_valid_youtube_url(url):
     youtube_pattern = r"(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+"
     return re.match(youtube_pattern, url) is not None
 
-def ask_file_extension():
-    file_extension = simpledialog.askstring("Formato de descarga", "Elija el formato de descarga (mp3 o mp4):")
-    if file_extension and file_extension.lower() in ['mp3', 'mp4']:
-        return file_extension.lower()
-    else:
-        messagebox.showerror("Error", "Por favor, ingresa un formato válido (mp3 o mp4).")
-        return None
-
 def download_from_url(download_manager):
     video_url = simpledialog.askstring("Descargar desde URL", "Introduce la URL del video de YouTube o de la playlist:")
     if video_url and is_valid_youtube_url(video_url):
         output_folder = filedialog.askdirectory(title="Seleccionar carpeta para guardar")
         if not output_folder:
             output_folder = None
-
-        file_extension = ask_file_extension()
-        if file_extension:
-            threading.Thread(target=download_manager.download_from_url, args=(video_url, output_folder, file_extension)).start()
+        threading.Thread(target=download_manager.download_from_url, args=(video_url, output_folder)).start()
     else:
         messagebox.showerror("Error", "Por favor, ingresa una URL de YouTube o playlist válida.")
 
@@ -198,30 +199,27 @@ def download_from_file(download_manager):
         output_folder = filedialog.askdirectory(title="Seleccionar carpeta para guardar")
         if not output_folder:
             output_folder = None
+        try:
+            with open(file_path, 'r') as file:
+                urls = [url.strip() for url in file if is_valid_youtube_url(url.strip())]
 
-        file_extension = ask_file_extension()
-        if file_extension:
-            try:
-                with open(file_path, 'r') as file:
-                    urls = [url.strip() for url in file if is_valid_youtube_url(url.strip())]
+            if not urls:
+                messagebox.showerror("Error", "El archivo de texto no contiene URLs válidas.")
+                return
 
-                if not urls:
-                    messagebox.showerror("Error", "El archivo de texto no contiene URLs válidas.")
-                    return
-
-                for url in urls:
-                    threading.Thread(target=download_manager.download_from_url, args=(url, output_folder, file_extension)).start()
-            except Exception as e:
-                messagebox.showerror("Error al procesar el archivo", f"{e}")
+            for url in urls:
+                threading.Thread(target=download_manager.download_from_url, args=(url, output_folder)).start()
+        except Exception as e:
+            messagebox.showerror("Error al procesar el archivo", f"{e}")
 
 def on_right_click(event, download_manager):
     try:
-        selection = listbox.curselection()
+        selection = download_manager.listbox.curselection()
         if selection:
             index = selection[0]
             download = download_manager.downloads[index]
             if download["status"] == "Error":
-                context_menu = Menu(listbox, tearoff=0)
+                context_menu = Menu(download_manager.listbox, tearoff=0)
                 context_menu.add_command(
                     label="Eliminar",
                     command=lambda: download_manager.remove_download(download)
@@ -231,12 +229,11 @@ def on_right_click(event, download_manager):
         pass
 
 def main():
-    global listbox
     root = tk.Tk()
-    root.title("Xpedian")
+    root.title("Xpedian Downloader")
 
     window_width = 800
-    window_height = 400
+    window_height = 500
     screen_width = root.winfo_screenwidth()
     screen_height = root.winfo_screenheight()
     x_cordinate = int((screen_width / 2) - (window_width / 2))
@@ -244,26 +241,41 @@ def main():
     root.geometry(f"{window_width}x{window_height}+{x_cordinate}+{y_cordinate}")
 
     root.configure(bg=BACKGROUND_COLOR)
-    download_manager = DownloadManager(root)
+
+    file_extension = simpledialog.askstring("Formato de descarga", "Elija el formato de descarga (mp3 o mp4):")
+    if file_extension not in ['mp3', 'mp4']:
+        messagebox.showerror("Error", "Por favor, ingresa un formato válido (mp3 o mp4).")
+        return
+
+    download_manager = DownloadManager(root, file_extension)
 
     frame = tk.Frame(root, bg=BACKGROUND_COLOR)
     frame.pack(pady=20, padx=20, fill="both", expand=True)
 
+    listbox_frame = tk.Frame(frame)
+    listbox_frame.pack(pady=10, padx=10, fill="both", expand=True)
+
+    scrollbar = Scrollbar(listbox_frame)
+    scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+
     listbox = tk.Listbox(
-        frame,
+        listbox_frame,
         bg=BACKGROUND_COLOR,
         fg=TEXT_COLOR,
         font=("Helvetica", 12),
         selectbackground=PRIMARY_COLOR,
-        activestyle="none"
+        activestyle="none",
+        yscrollcommand=scrollbar.set
     )
-    listbox.pack(pady=10, padx=10, fill="both", expand=True)
-    listbox.bind("<Button-3>", lambda event: on_right_click(event, download_manager))
+    listbox.pack(side=tk.LEFT, fill="both", expand=True)
+    scrollbar.config(command=listbox.yview)
+    
+    download_manager.set_listbox(listbox)
 
-    button_frame = tk.Frame(root, bg=BACKGROUND_COLOR)
+    button_frame = tk.Frame(frame, bg=BACKGROUND_COLOR)
     button_frame.pack(pady=10)
 
-    download_button = Button(
+    url_button = Button(
         button_frame,
         text="Descargar desde URL",
         bg=PRIMARY_COLOR,
@@ -271,7 +283,7 @@ def main():
         font=("Helvetica", 14),
         command=lambda: download_from_url(download_manager)
     )
-    download_button.pack(side="left", padx=20)
+    url_button.pack(side="left", padx=20)
 
     file_button = Button(
         button_frame,
