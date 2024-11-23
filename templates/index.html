@@ -1,0 +1,23 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Xpedian Downloader</title>
+</head>
+<body>
+    <h1>Bienvenido a Xpedian Downloader</h1>
+    <form action="/download" method="post">
+        <label>URL:</label><br>
+        <input type="text" name="url" required><br><br>
+        <label>Formato:</label><br>
+        <select name="format">
+            <option value="mp3">MP3</option>
+            <option value="mp4">MP4</option>
+        </select><br><br>
+        <label>Carpeta:</label><br>
+        <input type="text" name="folder" required><br><br>
+        <button type="submit">Descargar</button>
+    </form>
+</body>
+</html>
