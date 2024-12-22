@@ -1,159 +1,210 @@
 import os
-from tkinter import Tk, Label, Entry, Button, StringVar, filedialog, messagebox, Radiobutton
-from yt_dlp import YoutubeDL
-from flask import Flask, request, jsonify, render_template
+import re
 import threading
+from tkinter import Tk, Frame, Listbox, Button, Menu, simpledialog, filedialog, messagebox
+from yt_dlp import YoutubeDL
 
-# Descargar audio
-def download_audio(url, output_folder):
-    try:
-        options = {
-            'format': 'bestaudio/best',
-            'outtmpl': os.path.join(output_folder, '%(playlist_title)s/%(title)s.%(ext)s'),
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'quiet': False,
-            'no_warnings': True,
+
+PRIMARY_COLOR = "#007aff"
+SECONDARY_COLOR = "#34c759"
+BACKGROUND_COLOR = "#f5f5f5"
+TEXT_COLOR = "#1c1c1e"
+
+
+class DownloadManager:
+    def __init__(self, root):
+        self.root = root
+        self.downloads = []
+
+    def add_download(self, url, output_folder, file_extension):
+        download = {
+            "url": url,
+            "progress": 0,
+            "status": "Pendiente",
+            "output_folder": output_folder,
+            "file_extension": file_extension,
         }
-        with YoutubeDL(options) as ydl:
-            ydl.download([url])
-        return "El audio se descargó correctamente."
-    except Exception as e:
-        return f"Error al descargar audio: {e}"
+        self.downloads.append(download)
+        return download
+
+    def update_progress(self, download, percent_complete):
+        download["progress"] = percent_complete
+        self.update_list()
+
+    def update_list(self):
+        listbox.delete(0, "end")
+        for download in self.downloads:
+            listbox.insert(
+                "end", f"{download['url']} - {download['progress']:.2f}% - {download['status']}"
+            )
+
+    def download_playlist(self, url, output_folder, file_extension):
+        try:
+            with YoutubeDL({'quiet': True, 'extract_flat': True}) as ydl:
+                info = ydl.extract_info(url, download=False)
+                urls = [entry['url'] for entry in info.get('entries', [])]
+                for video_url in urls:
+                    threading.Thread(target=self.download_file, args=(video_url, output_folder, file_extension)).start()
+        except Exception as e:
+            messagebox.showerror("Error", f"Error al procesar la lista: {e}")
+
+    def download_file(self, url, output_folder, file_extension):
+        download = self.add_download(url, output_folder, file_extension)
+        download["status"] = "En progreso"
+        self.update_list()
+
+        try:
+            ydl_opts = {
+                'outtmpl': os.path.join(output_folder, '%(title)s.%(ext)s'),
+                'format': 'bestaudio/best' if file_extension == 'mp3' else 'bestvideo+bestaudio',
+                'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3'}] if file_extension == 'mp3' else [],
+            }
+            with YoutubeDL(ydl_opts) as ydl:
+                ydl.download([url])
+
+            download["status"] = "Completado"
+            download["progress"] = 100
+            notify_download_completed(download)
+        except Exception as e:
+            download["status"] = "Error"
+            messagebox.showerror("Error", f"Error al descargar {url}: {e}")
+        finally:
+            self.update_list()
+
+    def download_from_url(self, url, output_folder, file_extension):
+        if "playlist" in url.lower():
+            threading.Thread(target=self.download_playlist, args=(url, output_folder, file_extension)).start()
+        else:
+            threading.Thread(target=self.download_file, args=(url, output_folder, file_extension)).start()
+
+    def remove_download(self, index):
+        if 0 <= index < len(self.downloads):
+            del self.downloads[index]
+            self.update_list()
 
 
-# Descargar video
-def download_video(url, output_folder):
-    try:
-        options = {
-            'format': 'bestvideo+bestaudio/best',
-            'outtmpl': os.path.join(output_folder, '%(playlist_title)s/%(title)s.%(ext)s'),
-            'quiet': False,
-            'no_warnings': True,
-        }
-        with YoutubeDL(options) as ydl:
-            ydl.download([url])
-        return "El video se descargó correctamente."
-    except Exception as e:
-        return f"Error al descargar video: {e}"
+def is_valid_url(url):
+    youtube_pattern = r"(https?:\/\/)?(www\.)?(youtube\.com|youtu\.be)\/.+"
+    return re.match(youtube_pattern, url) is not None
 
 
-# Opción de consola
-def console_mode():
-    print("Bienvenido al modo consola")
-    file_extension = input("Selecciona el formato (mp3 o mp4): ").strip().lower()
-    output_folder = input("Introduce la carpeta de salida: ").strip()
-    url = input("Introduce la URL del video o playlist: ").strip()
-    
-    if file_extension == "mp3":
-        result = download_audio(url, output_folder)
-    elif file_extension == "mp4":
-        result = download_video(url, output_folder)
+def ask_file_extension():
+    file_extension = simpledialog.askstring("Formato", "Elija el formato de descarga (mp3 o mp4):")
+    if file_extension and file_extension.lower() in ['mp3', 'mp4']:
+        return file_extension.lower()
     else:
-        result = "Formato no válido."
-    
-    print(result)
+        messagebox.showerror("Error", "Por favor, ingresa un formato válido (mp3 o mp4).")
+        return None
 
 
-# Opción de escritorio con tkinter
-def desktop_mode():
-    def select_output_folder():
-        folder = filedialog.askdirectory(title="Selecciona la carpeta de salida")
-        if folder:
-            output_folder.set(folder)
+def notify_download_completed(download):
+    messagebox.showinfo("Descarga Completada", f"La descarga de {download['url']} se completó correctamente.")
 
-    def start_download():
-        url = url_var.get().strip()
-        folder = output_folder.get()
-        format_choice = format_var.get()
 
-        if not url or not folder:
-            messagebox.showerror("Error", "Por favor, completa todos los campos.")
+def download_from_url(download_manager):
+    video_url = simpledialog.askstring("Descargar desde URL", "Introduce la URL del video o la playlist:")
+    if video_url and is_valid_url(video_url):
+        output_folder = filedialog.askdirectory(title="Seleccionar carpeta para guardar")
+        if not output_folder:
             return
 
-        if format_choice == "mp3":
-            result = download_audio(url, folder)
-        elif format_choice == "mp4":
-            result = download_video(url, folder)
-        else:
-            result = "Formato no válido."
+        file_extension = ask_file_extension()
+        if file_extension:
+            download_manager.download_from_url(video_url, output_folder, file_extension)
+    else:
+        messagebox.showerror("Error", "Por favor, ingresa una URL válida.")
 
-        messagebox.showinfo("Resultado", result)
 
+def load_txt_file(download_manager):
+    file_path = filedialog.askopenfilename(
+        title="Seleccionar archivo .txt",
+        filetypes=[("Archivos de texto", "*.txt")]
+    )
+    if not file_path:
+        return
+
+    with open(file_path, "r") as file:
+        urls = file.readlines()
+
+    if urls:
+        output_folder = filedialog.askdirectory(title="Seleccionar carpeta para guardar")
+        if not output_folder:
+            return
+
+        file_extension = ask_file_extension()
+        if file_extension:
+            for url in urls:
+                url = url.strip()
+                if is_valid_url(url):
+                    download_manager.download_from_url(url, output_folder, file_extension)
+                else:
+                    messagebox.showerror("Error", f"URL inválida: {url}")
+
+
+def on_right_click(event, download_manager):
+    selection = listbox.curselection()
+    if selection:
+        index = selection[0]
+        context_menu = Menu(listbox, tearoff=0)
+        context_menu.add_command(label="Eliminar", command=lambda: download_manager.remove_download(index))
+        context_menu.post(event.x_root, event.y_root)
+
+
+def main():
+    global listbox
     root = Tk()
     root.title("Xpedian Downloader")
-    root.geometry("500x400")
 
-    url_var = StringVar()
-    output_folder = StringVar()
-    format_var = StringVar(value="mp3")
+    window_width = 800
+    window_height = 400
+    screen_width = root.winfo_screenwidth()
+    screen_height = root.winfo_screenheight()
+    x_cordinate = int((screen_width / 2) - (window_width / 2))
+    y_cordinate = int((screen_height / 2) - (window_height / 2))
+    root.geometry(f"{window_width}x{window_height}+{x_cordinate}+{y_cordinate}")
 
-    Label(root, text="Introduce la URL:").pack(pady=5)
-    Entry(root, textvariable=url_var, width=50).pack(pady=5)
+    root.configure(bg=BACKGROUND_COLOR)
+    download_manager = DownloadManager(root)
 
-    Label(root, text="Formato de descarga:").pack(pady=5)
-    Radiobutton(root, text="MP3 (Audio)", variable=format_var, value="mp3").pack()
-    Radiobutton(root, text="MP4 (Video)", variable=format_var, value="mp4").pack()
+    frame = Frame(root, bg=BACKGROUND_COLOR)
+    frame.pack(pady=20, padx=20, fill="both", expand=True)
 
-    Label(root, text="Selecciona la carpeta de salida:").pack(pady=5)
-    Button(root, text="Seleccionar Carpeta", command=select_output_folder).pack(pady=5)
+    listbox = Listbox(
+        frame,
+        bg=BACKGROUND_COLOR,
+        fg=TEXT_COLOR,
+        font=("Helvetica", 12),
+        selectbackground=PRIMARY_COLOR,
+        activestyle="none"
+    )
+    listbox.pack(pady=10, padx=10, fill="both", expand=True)
+    listbox.bind("<Button-3>", lambda event: on_right_click(event, download_manager))
 
-    Button(root, text="Iniciar Descarga", command=start_download).pack(pady=20)
+    button_frame = Frame(root, bg=BACKGROUND_COLOR)
+    button_frame.pack(pady=10)
+
+    download_button = Button(
+        button_frame,
+        text="Descargar desde URL",
+        bg=PRIMARY_COLOR,
+        fg="white",
+        font=("Helvetica", 14),
+        command=lambda: download_from_url(download_manager)
+    )
+    download_button.pack(side="left", padx=10)
+
+    load_txt_button = Button(
+        button_frame,
+        text="Cargar archivo .txt",
+        bg=SECONDARY_COLOR,
+        fg="white",
+        font=("Helvetica", 14),
+        command=lambda: load_txt_file(download_manager)
+    )
+    load_txt_button.pack(side="left", padx=10)
 
     root.mainloop()
 
 
-# Opción de web con Flask
-def web_mode():
-    app = Flask(__name__)
-
-    @app.route("/")
-    def index():
-        return render_template("index.html")  # Crear un archivo `templates/index.html`
-
-    @app.route("/download", methods=["POST"])
-    def download():
-        url = request.form.get("url")
-        format_choice = request.form.get("format")
-        output_folder = request.form.get("folder")
-
-        if not url or not output_folder:
-            return jsonify({"error": "Faltan datos."}), 400
-
-        if format_choice == "mp3":
-            result = download_audio(url, output_folder)
-        elif format_choice == "mp4":
-            result = download_video(url, output_folder)
-        else:
-            result = "Formato no válido."
-
-        return jsonify({"message": result})
-
-    threading.Thread(target=lambda: app.run(debug=True, use_reloader=False)).start()
-
-
-# Menú principal
-def main_menu():
-    print("Bienvenido a Xpedian Downloader")
-    print("Selecciona un modo de uso:")
-    print("1. Modo Consola")
-    print("2. Modo Escritorio (GUI)")
-    print("3. Modo Web")
-    choice = input("Elige una opción (1/2/3): ").strip()
-
-    if choice == "1":
-        console_mode()
-    elif choice == "2":
-        desktop_mode()
-    elif choice == "3":
-        web_mode()
-        print("Abre tu navegador en http://127.0.0.1:5000")
-    else:
-        print("Opción no válida.")
-
-
 if __name__ == "__main__":
-    main_menu()
+    main()
