@@ -4,7 +4,6 @@ import threading
 from tkinter import Tk, Frame, Listbox, Button, Menu, simpledialog, filedialog, messagebox
 from yt_dlp import YoutubeDL
 
-
 PRIMARY_COLOR = "#007aff"
 SECONDARY_COLOR = "#34c759"
 BACKGROUND_COLOR = "#f5f5f5"
