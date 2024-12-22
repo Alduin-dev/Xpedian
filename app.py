@@ -9,7 +9,6 @@ SECONDARY_COLOR = "#34c759"
 BACKGROUND_COLOR = "#f5f5f5"
 TEXT_COLOR = "#1c1c1e"
 
-
 class DownloadManager:
     def __init__(self, root):
         self.root = root
